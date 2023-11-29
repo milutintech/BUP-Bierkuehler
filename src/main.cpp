@@ -183,7 +183,7 @@ void RUNTIME( void * pvParameters ){
 //Christian Magnus Obrecht
 //****************************************************//
   for(;;){
-
+    esp_task_wdt_init(5, true); //Watchdog Timer wird gestartet
     //Aktuelle Temperatur auslesen
     aktueleTemp = thermo.temperature(RNOMINAL, RREF);
 
@@ -298,8 +298,22 @@ void RUNTIME( void * pvParameters ){
 //Code von Aris Cadruvi
 //****************************************************//
 void WEBSRV( void * pvParameters ){
-  for(;;){
 
+//****************************************************//
+//Setup des Webservers
+//Aris Cadruvi
+//****************************************************//
+
+/*Code Here*/
+
+
+//****************************************************//
+//Endlosschleife des Webservers
+//Aris Cadruvi
+//****************************************************//
+  for(;;){
+  esp_task_wdt_init(5, true); //Watchdog Timer wird gestartet
+  /*Code Here*/
   }
 }
 
