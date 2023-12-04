@@ -304,16 +304,92 @@ void WEBSRV( void * pvParameters ){
 //Aris Cadruvi
 //****************************************************//
 
-/*Code Here*/
+  // Einbinden der Libarys
+  
+  #include <WiFi.h>
+  #include <ESPAsyncWebServer.h>
 
+// SSID = Name des Wlans in Variable setzen / Password = Passwort des Wlans in Variable setzen.
+  
+const char* ssid = "REPLACE_WITH_YOUR_SSID";
+const char* password = "REPLACE_WITH_YOUR_PASSWORD";
+
+// Asynchroner Webserver auf Port 80 erstellen
+AsyncWebServer server(80);
+
+// Entcodete Bilder anzeigen sowie Grösse setzen.
+  
+const char index_html[/*HTML_CODE_einsetzen*/] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <h2>ESP Image Web Server</h2>
+  <img src="ENTCODET_IMAGE">
+</body>  
+</html>)rawliteral";
+
+
+void setup(){
+  // Serieller Port
+  
+  Serial.begin(115200);
+  
+  // Verbindung zum Wlan mithilfe der obig gesetzen Variablen.
+  
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println("Verbinde zum Wlan...");
+  }
+  // Verbindung zum Wlan abgeschlossen
+  if (Wifi.status() == WL_CONNECTED) {
+    delay(500);
+    Serial.println("Wlan Verbunden...");
+  }
+    // Wenn Wlan noch am Verbinden ist.
+    
+  else  {
+    Serial.println("Wlan noch nicht verbunden...")
+          }
+   
+  // ESP32 IP Adresse des Webservers ausgeben.
+  
+  Serial.println(WiFi.localIP());
+
+  // Anfragen / Aurufen des Webservers verarbeiten.
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", index_html);
+  });
+
+  // Starten des Webservers nach Anfrage
+  
+  server.begin();
+}
+ 
+void loop(){
+  
+}
 
 //****************************************************//
 //Endlosschleife des Webservers
 //Aris Cadruvi
 //****************************************************//
   for(;;){
-  esp_task_wdt_init(5, true); //Watchdog Timer wird gestartet
-  /*Code Here*/
+  //Watchdog Timer wird gestartet
+    
+  esp_task_wdt_init(5, true);
+    
+  //Webserver alle 5 Sekunden refreshen um neue Daten darzustellen.
+  
+  <meta http-equiv="refresh" content="5">
+
+  //Ausgabe der Werte
+     client.println("<th>aktueleTemp</th>");       //Aktuelle Temperatur
+     client.println("<th>restzeit</th>");          //Restzeit der Kühlung
+     client.println("<th>BierCnt</th>");          //Gekühlte Biere insgesammt        
   }
 }
 
