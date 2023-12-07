@@ -1,7 +1,7 @@
 /***************************************************************************************
 Autor:        Christian Magnus Obrecht
 Projekt:      Bierkühler Steuer System
-Beschreibung: Büp bei Patrick Rupp Temperatursteuerung für ein Bier schnellkühlsystem
+Beschreibung: Büp bei Patrick Rupp Temperatursteuerung für ein Bierschnellkühlsystem
 Datum:        28.11.2023
 Version:      1.0
 ****************************************************************************************/
@@ -26,6 +26,9 @@ Version:      1.0
 #include <SPI.h>                    //Wird verwendet für den SPI bus
 #include <Wire.h>                   //Wird verwendet für den I2C bus
 #include <EEPROM.h>                 //Wird verwendet um daten über das gerät zu speichern
+#include "Nextion.h"                //Wird verwendet für Touch Display
+#include <stdio.h>                   //Wird verwendet um eine int in ein string umzuwandeln
+
 
 //****************************************************//
 //Deklarationen
@@ -59,11 +62,21 @@ Version:      1.0
 #define COOLDOWN 2                //ESP startet die Vorkühlung bis die Temperatur START_TEMP erreicht wird oder der Taster lang gedrückt wird
 #define COOLING 3                 //ESP startet die Kühlung für LAUFZEIT
 
+//Nextion deffinitionen
+#define BeerCNTID 0                 //ID des BeerCNT Textfeldes
+#define CurrentTempID 1             //ID des CurrentTemp Textfeldes
+#define RestZeitID 2                //ID des RestTime Textfeldes
+#define STATEID 3                   //ID des State Textfeldes
+#define ProgressID 4                //ID des Program Textfeldes
+
 //EEPROM deffinitionen
 #define EEPROM_SIZE 3             //Grösse des EEPROM Speichers in byte
 #define EEPROM_ERROR 0            //Adresse des Error Counters
 #define EEPROM_BIER_MSB 1         //Adresse des Bier Counters
 #define EEPROM_BIER_LSB 2         //Adresse des Bier Counters
+
+//LED pin deffiniren
+#define LED_IO 48
 
 //Timer Zeiten in Millisekunden
 uint16_t LangerDruckInMills = LANGERDRUCK * 1000;
@@ -88,6 +101,17 @@ unsigned long Lauftimer = 0;      //Timer für die Laufzeit
 unsigned long Standbytimer = 0;   //Timer für die Standbyzeit
 unsigned long Drucktimer = 0;     //Timer für den Taster
 
+//Funktions Prototypen
+void updateTXT(uint8_t ID, uint32_t value);
+//Nextion Display setup
+//page ,id, object
+NexProgressBar Progress  = NexProgressBar(0, 2, "Progress");
+NexText BeerCNT = NexText(0, 3, "BeerCNT");
+NexText CurrentTemp = NexText(0, 5, "CurrentTemp");
+NexText RestTime = NexText(0, 6, "RestTime");
+NexText State = NexText(0, 7, "State");
+
+
 //****************************************************//
 //Multicore Task Setup
 //Christian Magnus Obrecht
@@ -107,8 +131,8 @@ TaskHandle_t Task2;
 //Christian Magnus Obrecht
 //****************************************************//
 
-//Adafruit_MAX31865 thermo = Adafruit_MAX31865(10, 11, 13, 12); //software SPI: CS, DI, DO, CLK
-Adafruit_MAX31865 thermo = Adafruit_MAX31865(36, 6, 5, 4); //software SPI: CS, DI, DO, CLK
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(10, 11, 13, 12); //software SPI: CS, DI, DO, CLK
+
 #define RREF      220.0                                       //Refferenz Widerstand
 
 #define RNOMINAL  100.0                                       //PT 100 Nomineller Widerstand
@@ -122,7 +146,6 @@ Adafruit_MAX31865 thermo = Adafruit_MAX31865(36, 6, 5, 4); //software SPI: CS, D
 
 void setup() {
 
-  
 
   //Task 1 wird auf Core 0 gestartet und Regelt den gesamten Ablauf
   xTaskCreatePinnedToCore(
@@ -171,6 +194,7 @@ void RUNTIME( void * pvParameters ){
 
   //Startknopf als Eingang deffinieren
   rtc_gpio_deinit(GPIO_NUM_21);
+  pinMode(LED_IO, OUTPUT);
   pinMode(BTN_START, INPUT);
 
   //PWM channel einrichten 10Bit @20kHz
@@ -182,9 +206,10 @@ void RUNTIME( void * pvParameters ){
   ledcAttachPin(PWM_PUMPE, 0);
   ledcAttachPin(PWM_ROTATION, 1);
   ledcAttachPin(PWM_PELTIER, 2);
+  
 
   //Serial Monitor starten (Aktuell nur für Debugging)
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
   //PT100 initialisieren
   thermo.begin(MAX31865_2WIRE);  //läuft im 2 Draht Modus
@@ -192,23 +217,38 @@ void RUNTIME( void * pvParameters ){
   //StandbyTimer starten
   Standbytimer = millis ();
 
-  Serial.print("Error Count: ");
-  Serial.println(ErrorCnt);
+  //Serial.print("Error Count: ");
+  //Serial.println(ErrorCnt);
+
+  //Muss 2x aufgerufen werden
+  nexInit();
+  nexInit();
+  updateTXT(BeerCNTID, BierCnt);
+  
+  
 //****************************************************//
 //Endlosschleife des Steuerungssystems
 //Christian Magnus Obrecht
 //****************************************************//
   for(;;){
+
     esp_task_wdt_init(5, true); //Watchdog Timer wird gestartet
+
     //Aktuelle Temperatur auslesen
     aktueleTemp = thermo.temperature(RNOMINAL, RREF);
+    
+    //updaten des Nextion displays
+    updateTXT(CurrentTempID, aktueleTemp);
+    updateTXT(STATEID, mode);
+
 
     //Modes in switch case
     switch (mode){
 
       //Peripherien werden Abgeschaltet und ESP wechselt in deepSleep
       case OFF:
-        Serial.println("Going to sleep");
+        digitalWrite(LED_IO, LOW); //set status LED off
+        //Serial.println("Going to sleep");
         //Wakeup Interupt Pin wird deffiniert
         esp_sleep_enable_ext0_wakeup(GPIO_NUM_21, 1);
         mode = STANDBY;
@@ -217,6 +257,7 @@ void RUNTIME( void * pvParameters ){
 
       //ESP wartet auf Startsignal oder auf Ablauf des standbytimers
       case STANDBY:
+        digitalWrite(LED_IO, HIGH); //set status LED on
         if(!digitalRead(BTN_START)){
           ButtonLockout = false;
         }
@@ -243,7 +284,7 @@ void RUNTIME( void * pvParameters ){
         }
         //Bei Knopfdruck wird in die Vorkühlung gewechselt
         if(digitalRead(BTN_START)&& ButtonLockout == false){
-          Serial.println("Button pressed Cool down");
+          //Serial.println("Button pressed Cool down");
           delay(100);
           mode = COOLDOWN;
           pixels.clear();                                                       //Alle NeoPixel werden ausgeschaltet  
@@ -253,20 +294,20 @@ void RUNTIME( void * pvParameters ){
 
       //ESP startet die Vorkühlung bis die Temperatur START_TEMP erreicht wird oder der Taster lang gedrückt wird
       case COOLDOWN:
-        Serial.println("Cooling down");
+        //Serial.println("Cooling down");
         //Wenn die Temperatur über MIN_TEMP ist werden die Pumpe und die Peltier elemente eingeschaltet
         if(aktueleTemp >= MIN_TEMP){
           ledcWrite(0, NOM_SPEED_PUMPE);
           ledcWrite(2, PWM_MAX);
-          Serial.print("Cooling down, Current Temp: ");
-          Serial.println(aktueleTemp);
+          //Serial.print("Cooling down, Current Temp: ");
+          //Serial.println(aktueleTemp);
         }
 
         //Temperatur ist unter MIN_TEMP und die Peltier Elemente und die Pumpe werden ausgeschaltet
         else{
           ledcWrite(0, PWM_OFF);
           ledcWrite(2, PWM_OFF);
-          Serial.println("Target temp reached");
+          //Serial.println("Target temp reached");
         }
         //Wenn der Knopf eine pos Flanke sieht wird startet der drucktimer und Lockout wird gesetzt
         if(digitalRead(BTN_START) && ButtonLockout == false){
@@ -274,34 +315,35 @@ void RUNTIME( void * pvParameters ){
           Drucktimer = millis();
         }
         //Wenn der Knopf losgelassen wird bevor die Lang druck Zeit abgelaufen ist wird der Kühlvorgang gestartet
-        if((!digitalRead(BTN_START)) && ButtonLockout == true){
+        if((!digitalRead(BTN_START)) && ButtonLockout == true && aktueleTemp <= START_TEMP){
           ButtonLockout = false;
           mode = COOLING;
-          Serial.println("Starting Cooling");
+          //Serial.println("Starting Cooling");
           Lauftimer = millis();
 
      
         }
         //Wenn der Knopf gedrücktbleibt bis die Lang druck Zeit abgelaufen ist wird in den Standby Modus gewechselt
         if(digitalRead(BTN_START) && ButtonLockout == true && Drucktimer + LangerDruckInMills < millis()){
-          Serial.println("Button pressed Standby");
+          //Serial.println("Button pressed Standby");
           mode = STANDBY;
           Standbytimer = millis ();
         }
       break;
       //ESP startet die Kühlung für LAUFZEIT und der Rotationsmotor wird eingeschaltet
       case COOLING:
-        Serial.println("Cooling");
+        //Serial.println("Cooling");
         //Während der Laufzeit wird die Pumpe und der Rotationsmotor eingeschaltet und die Temperatur überwacht
         if(Lauftimer + LaufzeitInMills >= millis()){
           restzeit = (LaufzeitInMills - (millis() - Lauftimer)) / 1000;
           ledcWrite(0, NOM_SPEED_PUMPE);
           ledcWrite(1, NOM_SPEED_ROTATION);
-          Serial.print("Cooling, Current Temp: ");
-          Serial.print(aktueleTemp);
-          Serial.print(" Restzeit: ");
-          Serial.println(restzeit);
-
+          //Serial.print("Cooling, Current Temp: ");
+          //Serial.print(aktueleTemp);
+          //Serial.print(" Restzeit: ");
+          //Serial.println(restzeit);
+          updateTXT(RestZeitID, restzeit);
+          updateTXT(ProgressID, restzeit);
           //NeoPixel werden auf rot gesetzt und die Restzeit wird angezeigt
           NeoPixelFaktor = 64 / LAUFZEIT;                                       //Faktor für die Anzahl der NeoPixel pro Sekunde wird berechnet       
           pixels.clear();                                                       //Alle NeoPixel werden ausgeschaltet       
@@ -320,11 +362,12 @@ void RUNTIME( void * pvParameters ){
         //Wenn die Laufzeit abgelaufen ist wird in den COOLDOWN Modus umgeschaltet
         else{
           BierCnt++;
+          updateTXT(BeerCNTID, BierCnt);
           EEPROM.write(EEPROM_BIER_MSB, BierCnt >> 8);
           EEPROM.write(EEPROM_BIER_LSB, BierCnt);
           EEPROM.commit();
-          Serial.print("Cooling done, cooled Beers: ");
-          Serial.println(BierCnt);
+          //Serial.print("Cooling done, cooled Beers: ");
+          //Serial.println(BierCnt);
           ledcWrite(0, 0);
           ledcWrite(1, 0);
           ledcWrite(2, 0);
@@ -371,4 +414,58 @@ void WEBSRV( void * pvParameters ){
 //****************************************************//
 void loop() {
 
+}
+
+//****************************************************//
+//Funktionen
+//Christian Magnus Obrecht
+//****************************************************//
+
+//Nextion Textfelder werden aktualisiert
+void updateTXT(uint8_t ID, uint32_t value){
+  //Serial.println("Not Done");
+  char prepVal[20] = "";
+  int prepMap = 0;
+
+  //Umwandeln von int zu char 
+  snprintf(prepVal, sizeof(prepVal), "%d", value);
+  //Switchcase um die ID auszuwerten
+  switch(ID) {
+    case BeerCNTID:
+      BeerCNT.setText(prepVal);
+    break;
+      
+    case CurrentTempID:
+      CurrentTemp.setText(prepVal);
+    break;
+
+    case RestZeitID:
+      RestTime.setText(prepVal);
+    break;
+
+    case STATEID:
+      switch(value){
+        case OFF:
+          State.setText("OFF");
+        break;
+        case STANDBY:
+          State.setText("Standby");
+        break;
+        case COOLDOWN:
+          State.setText("Cooldown");
+        break;
+        case COOLING:
+          State.setText("Cooling");
+        break;
+      }
+    break;
+
+    case ProgressID:
+      //Mappen der Laufzeit auf die Skala der progress Bar
+      prepMap = map(value, 0, LAUFZEIT,0, 100);
+      Progress.setValue(prepMap);
+    break;
+    default:
+    break;
+  }
 }
