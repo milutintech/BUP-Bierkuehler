@@ -223,7 +223,7 @@ void RUNTIME( void * pvParameters ){
   //Muss 2x aufgerufen werden
   nexInit();
   nexInit();
-  updateTXT(BeerCNTID, BierCnt);
+  
   
   
 //****************************************************//
@@ -240,7 +240,7 @@ void RUNTIME( void * pvParameters ){
     //updaten des Nextion displays
     updateTXT(CurrentTempID, aktueleTemp);
     updateTXT(STATEID, mode);
-
+    updateTXT(BeerCNTID, BierCnt);
 
     //Modes in switch case
     switch (mode){
